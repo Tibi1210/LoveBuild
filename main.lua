@@ -1,37 +1,240 @@
-_G.love = require("love")
-local mapLoader = require "lib/mapLoader"
-
 local next_time
 local min_dt
+local map = false
 
-local sectors = {
-    -- float floor
-    -- float ceil
-    -- struct vertexes {float x,
-    --                float y}
-    -- char neighbors
-    -- unsigned npoints
-}
+local mouseX = 0
+local mouseY = 0
+local mouseDX = 0
+local mouseDY = 0
+
+-- float floor;
+-- float ceil;
+-- struct vertexes {float x,
+--                float y};
+-- char neighbors;
+-- unsigned npoints;
+local sectors = {}
 local numSectors = 0
 
-local player = {
-    -- struct where {float x,
-    --               float y}
-    --               float z}
-    -- struct velocity {float x,
-    --                  float y}
-    --                  float z}
-    -- float angle
-    -- float angleCos
-    -- float angleSin
-    -- float yaw
-    -- unsigned sector
-}
+-- struct where {float x,
+--               float y
+--               float z};
+-- struct velocity {float x,
+--                  float y
+--                  float z};
+-- float angle;
+-- float angleCos;
+-- float angleSin;
+-- float yaw;
+-- unsigned sector;
+local player = {}
 
+-- clamp value into set range
+local function clamp(a, mi,ma)
+    return math.min(math.max(a,mi),ma)
+end
+-- determines if two number of ranges overlap
+local function overlap(a0,a1, b0,b1)
+    return (math.min(a0, a1) <= math.max(b0, b1) and math.min(b0, b1) <= math.max(a0, a1))
+end
+-- determines if two 2D boxes intersect
+local function intersectBox(x0,y0, x1,y1, x2,y2, x3,y3)
+    return (overlap(x0,x1,x2,x3) and overlap(y0,y1,y2,y3))
+end
+-- vector cross product
+local function vxs(x0,y0, x1,y1)
+    return (x0*y1 - x1*y0)
+end
+-- determines wich side of the line the point is on
+local function pointSide(px,py, x0,y0, x1,y1)
+    return vxs(x1-x0, y1-y0, px-x0, py-y0)
+end
+-- calculate point of intersection between two lines
+local function intersect(x1,y1, x2,y2, x3,y3, x4,y4)
+    -- float x;
+    -- float y
+    local vertex = {}
+    vertex.x = vxs(vxs(x1,y1, x2,y2), (x1)-(x2), vxs(x3,y3, x4,y4), (x3)-(x4)) / vxs((x1)-(x2), (y1)-(y2), (x3)-(x4), (y3)-(y4))
+    vertex.y = vxs(vxs(x1,y1, x2,y2), (y1)-(y2), vxs(x3,y3, x4,y4), (y3)-(y4)) / vxs((x1)-(x2), (y1)-(y2), (x3)-(x4), (y3)-(y4))
+    return vertex
+end
+
+-- draws a pixel on a given x,y coordinate of the window in the color r,g,b
 local function drawPixel(x, y, r, g, b)
-
     love.graphics.setColor(love.math.colorFromBytes(r, g, b))
     love.graphics.points(x, y)
+end
+
+-- draw a vertical line with a different color top and bottom
+local function vLine(x, y1, y2, top, middle, bottom)
+   love.graphics.setColor(love.math.colorFromBytes(top[1], top[2], top[3]))
+   love.graphics.points(x, y1)
+   love.graphics.setColor(love.math.colorFromBytes(middle[1], middle[2], middle[3]))
+   if y1<y2 then
+        love.graphics.line(x, y1+1, x, y2)
+    else
+        love.graphics.line(x, y2+1, x, y1)
+    end
+   love.graphics.setColor(love.math.colorFromBytes(bottom[1], bottom[2], bottom[3]))
+   love.graphics.points(x, y2)
+end
+
+local function DrawScreen()
+    local now = {
+        sectorno = player.sector, -- int
+        sx1 = 1, -- int
+        sx2 = SW-1 -- int
+    }
+
+
+    local ytop = {}    --int array
+    local ybottom = {}    --int array
+    for i=1, SW do ytop[i] = 0 end
+    for i=1, SW do ybottom[i] = SH-1 end
+
+    local sect = sectors[now.sectorno]
+
+    -- render each wall
+    for s = 1, sect.npoints do
+        -- get (x,y) coords of the two ends of the sector
+        -- transform into players view
+        local vx1 = sect.vertexes[s+0].x - player.where.x -- float
+        local vy1 = sect.vertexes[s+0].y - player.where.y -- float
+        local vx2 = sect.vertexes[s+1].x - player.where.x -- float
+        local vy2 = sect.vertexes[s+1].y - player.where.y -- float
+        
+        -- rotate them around the player
+        local pcos = player.angleCos -- float
+        local psin = player.angleSin -- float
+        local tx1 = vx1 * psin - vy1 * pcos -- float
+        local tz1 = vx1 * pcos + vy1 * psin -- float
+        local tx2 = vx2 * psin - vy2 * pcos -- float
+        local tz2 = vx2 * pcos + vy2 * psin -- float
+
+        -- is the wall in front of the player
+        if tz1 <= 0 and tz2 <=0 then goto continue end
+        -- if partially behind player clip
+        if tz1 <= 0 or tz2 <=0 then
+            local nearz = 1*(10^(-4)) -- float
+            local farz = 5 -- float
+            local nearside = 1*(10^(-5))
+            local farside = 20.0
+            local i1 = intersect(tx1,tz1,tx2,tz2, -nearside, nearz, -farside, farz) -- vertex
+            local i2 = intersect(tx1,tz1,tx2,tz2,  nearside, nearz,  farside, farz) -- vertex
+            if tz1 < nearz then
+                if i1.y > 0 then
+                    tx1 = i1.x
+                    tz1 = i1.y
+                else
+                    tx1 = i2.x
+                    tz1 = i2.y
+                end
+            end
+
+            if tz2 < nearz then
+                if i1.y > 0 then
+                    tx2 = i1.x
+                    tz2 = i1.y
+                else
+                    tx2 = i2.x
+                    tz2 = i2.y
+                end
+            end
+        end
+        
+        -- perspective transformation
+        local xscale1 = H_FOV / tz1
+        local yscale1 = V_FOV / tz1
+        local x1 = Int:create(SW/2 - Int:create(tx1 * xscale1)[1]) -- integer
+
+        local xscale2 = H_FOV / tz2
+        local yscale2 = V_FOV / tz2
+        local x2 = Int:create(SW/2 - Int:create(tx2 * xscale2)[1]) -- integer
+        -- only render if visible
+        if x1[1]>=x2[1] or x2[1]<now.sx1 or x1[1]>now.sx2 then goto continue end
+
+        -- floor and ceiling heights relative to player
+        local yceil = sect.ceil - player.where.z -- float
+        local yfloor = sect.floor - player.where.z -- float
+
+        local neighbor = sect.neighbors[s]
+        -- project ceiling and floor heights into screen coodrinates
+        local y1a = Int:create(SH/2 - Int:create(yceil * yscale1)[1]) -- integer
+        local y1b = Int:create(SH/2 - Int:create(yfloor * yscale1)[1]) -- integer
+        local y2a = Int:create(SH/2 - Int:create(yceil * yscale2)[1]) -- integer
+        local y2b = Int:create(SH/2 - Int:create(yfloor * yscale2)[1]) -- integer
+
+        -- render wall
+
+        local beginx = math.max(x1[1], now.sx1) -- integer
+        local endx = math.min(x2[1], now.sx2) -- integer
+        for x = beginx, endx do  --------------------------------- i<=endx
+
+            -- Y coords of ceiling and floor for this X coord
+            local ya = Int:create((x - x1[1]) * (y2a[1] - y1a[1]) / (x2[1] - x1[1]) + y1a[1]) -- integer
+            local cya = Int:create(clamp(ya[1], ytop[x], ybottom[x])) -- integer
+            local yb = Int:create((x - x1[1]) * (y2b[1] - y1b[1]) / (x2[1] - x1[1]) + y1b[1]) -- integer
+            local cyb = Int:create(clamp(yb[1], ytop[x], ybottom[x])) -- integer
+            
+            
+            -- render ceiling
+            vLine(x, ytop[x], (cya-1)[1], {0,0,0},{255,0,0},{0,0,0})
+            -- render floor
+            vLine(x, (cyb+1)[1], ybottom[x], {0,0,0},{0,255,0},{0,0,0})
+            -- sector behind edge?
+            if tonumber(neighbor) >= 0 then
+                -- portal
+                vLine(x, cya[1], cyb[1], {0,0,0},{0,0,255},{0,0,0})
+            else
+                if x==x1[1] or x==x2[1] then
+                    -- ??
+                    vLine(x, cya[1], cyb[1], {0,0,0},{100,100,100},{0,0,0})
+                else
+                    -- render wall
+                    vLine(x, cya[1], cyb[1], {0,0,0},{255,255,255},{0,0,0})
+                end
+            end
+
+        end
+
+        ::continue::
+    end
+
+end
+
+local function movePlayer(dx, dy)
+    local px = player.where.x
+    local py = player.where.y
+    local sect = sectors[player.sector]
+    local acceleration = 1
+
+    for s = 1, sect.npoints do
+        if tonumber(sect.neighbors[s]) >= 0
+         and intersectBox(px,py, px+dx,py+dy, sect.vertexes[s+0].x, sect.vertexes[s+0].y, sect.vertexes[s+1].x, sect.vertexes[s+1].y)
+          and pointSide(px+dx, py+dy, sect.vertexes[s+0].x, sect.vertexes[s+0].y, sect.vertexes[s+1].x, sect.vertexes[s+1].y) < 0 then
+            player.sector = tonumber(sect.neighbors[s]);
+            print("Player is now in sector %d\n", player.sector);
+        end
+    end
+
+    player.velocity.x = player.velocity.x * (1-acceleration) + dx * acceleration;
+    player.velocity.y = player.velocity.y * (1-acceleration) + dy * acceleration;
+
+    player.where.x = player.where.x + player.velocity.x;
+    player.where.y = player.where.y + player.velocity.y;
+
+    if mouseDX > 1 or mouseDX < -1 then
+
+        player.angle = player.angle + mouseDX * 0.03
+        player.angleCos = math.cos(player.angle)
+        player.angleSin = math.sin(player.angle)
+        local yaw = 0
+        yaw = clamp(yaw - mouseDY * 0.05, -5, 0)
+        player.yaw = yaw - player.velocity.z * 0.5
+    end
+
+
+    
 end
 
 
@@ -41,45 +244,61 @@ function love.load()
     min_dt = 1 / FPS
     next_time = love.timer.getTime()
 
-    sectors, player = mapLoader.loadMap("map-clear")
-    print(player.angleSin)
+    sectors, player = MapLoader.loadMap("map-clear")
+    numSectors = #sectors
 end
 
 function love.update(dt)
     next_time = next_time + min_dt
 
+    local move_vec = {0.0, 0.0};
     if love.keyboard.isDown("a") then
+        move_vec[1] = move_vec[1] + player.angleSin*0.2
+        move_vec[2] = move_vec[2] - player.angleCos*0.2
     end
 
     if love.keyboard.isDown("d") then
+        move_vec[1] = move_vec[1] - player.angleSin*0.2
+        move_vec[2] = move_vec[2] + player.angleCos*0.2
     end
 
     if love.keyboard.isDown("w") then
+        move_vec[1] = move_vec[1] + player.angleCos*0.2
+        move_vec[2] = move_vec[2] + player.angleSin*0.2
     end
 
     if love.keyboard.isDown("s") then
+        move_vec[1] = move_vec[1] - player.angleCos*0.2
+        move_vec[2] = move_vec[2] - player.angleSin*0.2
     end
+
+    movePlayer(move_vec[1], move_vec[2])
+
 end
+
 
 function love.draw()
     love.graphics.setColor(love.math.colorFromBytes(255, 255, 255))
     love.graphics.print("FPS: " .. love.timer.getFPS(), 10, 12)
-
-    for i = 1, #sectors, 1 do
-        for j = 1, #sectors[i].vertexes do
-            drawPixel((sectors[i].vertexes[j].x+10)*10, (sectors[i].vertexes[j].y+10)*10, 255,255,255)
+    
+    if map then
+        for i = 1, #sectors, 1 do
+            for j = 1, #sectors[i].vertexes do
+                drawPixel((sectors[i].vertexes[j].x+(SW/2)), (sectors[i].vertexes[j].y+(SH/2)), 255,255,255)
+            end
         end
+        drawPixel((player.where.x+(SW/2)), (player.where.y+(SH/2)), 255,0,0)
+    else  
+        DrawScreen()
     end
-
-    drawPixel((player.where.x+10)*10, (player.where.y+10)*10, 255,0,0)
-
+    
     local cur_time = love.timer.getTime()
     if next_time <= cur_time then
         next_time = cur_time
         return
     end
     love.timer.sleep(next_time - cur_time)
-
+    
 end
 
 function love.keypressed(key)
@@ -88,6 +307,27 @@ function love.keypressed(key)
     end
     if key == 'space' then
         love.event.quit("restart")
-      end
+    end
+    
+    if key == 'm' then
+        map = not map
+        print("Map opened: ".. tostring(map))
+    end
 
+    if key == "tab" then
+        --local state = not love.mouse.isVisible()
+        --love.mouse.setVisible(state)
+        --local state = not love.mouse.isGrabbed()
+        --love.mouse.setGrabbed(state)
+        local relative = love.mouse.getRelativeMode()
+        love.mouse.setRelativeMode(not relative)
+     end
+    
+end
+
+function love.mousemoved( x, y, dx, dy, istouch )
+    mouseX = x
+    mouseY = y
+    mouseDX = dx
+    mouseDY = dy
 end

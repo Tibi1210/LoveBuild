@@ -1,32 +1,29 @@
 local mapLoader = {}
 
-local sectors = {
-    -- float floor
-    -- float ceil
-    -- struct vertexes {float x,
-    --                float y}
-    -- char neighbors
-    -- unsigned npoints
-}
+-- float floor
+-- float ceil
+-- struct vertexes {float x,
+--                float y}
+-- char neighbors
+-- unsigned npoints
+local sectors = {}
 
-local vertex = {
-    -- float x
-    -- float y
-}
+-- float x
+-- float y
+local vertex = {}
 
-local player = {
-    -- struct where {float x,
-    --               float y}
-    --               float z}
-    -- struct velocity {float x,
-    --                  float y}
-    --                  float z}
-    -- float angle
-    -- float angleCos
-    -- float angleSin
-    -- float yaw
-    -- unsigned sector
-}
+-- struct where {float x,
+--               float y}
+--               float z}
+-- struct velocity {float x,
+--                  float y}
+--                  float z}
+-- float angle
+-- float angleCos
+-- float angleSin
+-- float yaw
+-- unsigned sector
+local player = {}
 
 local function split(str, sep)
     local result = {}
@@ -72,7 +69,7 @@ local function loadPlayer(pos, angle, sector)
     player.where = {}
     player.where.x = p[1]
     player.where.y = p[2]
-    player.where.z = p[3]
+    player.where.z = 6
     player.velocity = {}
     player.velocity.x = 0
     player.velocity.y = 0

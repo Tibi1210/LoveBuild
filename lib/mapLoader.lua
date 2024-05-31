@@ -51,8 +51,14 @@ local function loadSectors(heights, vert, neighbors)
     sectors[#sectors].floor = tonumber(h[1])
     sectors[#sectors].ceil = tonumber(h[2])
     sectors[#sectors].npoints = #v
-    sectors[#sectors].neighbors = n
-
+    sectors[#sectors].neighbors = {}
+    for index, value in ipairs(n) do
+        if tonumber(value) ~= -1 then
+            sectors[#sectors].neighbors[index] = tonumber(value) + 1
+        else
+            sectors[#sectors].neighbors[index] = tonumber(value)
+        end
+    end
     sectors[#sectors].vertexes = {}
     table.insert(sectors[#sectors].vertexes, vertex[v[#v] + 1])
     for i = 1, #v do

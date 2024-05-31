@@ -14,7 +14,6 @@ local mouseDY = 0
 -- char neighbors;
 -- unsigned npoints;
 local sectors = {}
-local numSectors = 0
 
 -- struct where {float x,
 --               float y
@@ -209,19 +208,19 @@ local function movePlayer(dx, dy)
     local acceleration = 1
 
     for s = 1, sect.npoints do
-        if tonumber(sect.neighbors[s]) >= 0
+        if sect.neighbors[s] >= 0
          and intersectBox(px,py, px+dx,py+dy, sect.vertexes[s+0].x, sect.vertexes[s+0].y, sect.vertexes[s+1].x, sect.vertexes[s+1].y)
           and pointSide(px+dx, py+dy, sect.vertexes[s+0].x, sect.vertexes[s+0].y, sect.vertexes[s+1].x, sect.vertexes[s+1].y) < 0 then
-            player.sector = tonumber(sect.neighbors[s]);
-            print("Player is now in sector %d\n", player.sector);
+            player.sector = sect.neighbors[s]
+            print("Player is now in sector %d\n", player.sector)
         end
     end
 
-    player.velocity.x = player.velocity.x * (1-acceleration) + dx * acceleration;
-    player.velocity.y = player.velocity.y * (1-acceleration) + dy * acceleration;
+    player.velocity.x = player.velocity.x * (1-acceleration) + dx * acceleration
+    player.velocity.y = player.velocity.y * (1-acceleration) + dy * acceleration
 
-    player.where.x = player.where.x + player.velocity.x;
-    player.where.y = player.where.y + player.velocity.y;
+    player.where.x = player.where.x + player.velocity.x
+    player.where.y = player.where.y + player.velocity.y
 
     if mouseDX > 1 or mouseDX < -1 then
 
@@ -245,13 +244,13 @@ function love.load()
     next_time = love.timer.getTime()
 
     sectors, player = MapLoader.loadMap("map-clear")
-    numSectors = #sectors
+
 end
 
 function love.update(dt)
     next_time = next_time + min_dt
 
-    local move_vec = {0.0, 0.0};
+    local move_vec = {0.0, 0.0}
     if love.keyboard.isDown("a") then
         move_vec[1] = move_vec[1] + player.angleSin*0.2
         move_vec[2] = move_vec[2] - player.angleCos*0.2

@@ -7,6 +7,16 @@ local mouseY = 0
 local mouseDX = 0
 local mouseDY = 0
 
+local colors = {
+    red = {255,0,0},
+    green = {0,255,0},
+    blue = {0,0,255},
+    black = {0,0,0},
+    white = {255,255,255},
+    light_grey = {200,200,200},
+    dark_grey = {100,100,100},
+}
+
 -- float floor;
 -- float ceil;
 -- struct vertexes {float x,
@@ -78,13 +88,14 @@ local function vLine(x, y1, y2, top, middle, bottom)
    love.graphics.points(x, y2)
 end
 
+-- renders sectors->walls
 local function DrawScreen()
+
     local now = {
         sectorno = player.sector, -- int
         sx1 = 1, -- int
         sx2 = SW-1 -- int
     }
-
 
     local ytop = {}    --int array
     local ybottom = {}    --int array
@@ -93,7 +104,7 @@ local function DrawScreen()
 
     local sect = sectors[now.sectorno]
 
-    -- render each wall
+    -- render each wall of the sector
     for s = 1, sect.npoints do
         -- get (x,y) coords of the two ends of the sector
         -- transform into players view
@@ -157,11 +168,24 @@ local function DrawScreen()
         local yfloor = sect.floor - player.where.z -- float
 
         local neighbor = sect.neighbors[s]
+
+        local nyceil = 0 --float
+        local nyfloor = 0 --float
+        if neighbor >= 0 then
+            nyceil = sectors[neighbor].ceil - player.where.z
+            nyfloor = sectors[neighbor].floor - player.where.z
+        end
+
         -- project ceiling and floor heights into screen coodrinates
         local y1a = Int:create(SH/2 - Int:create(yceil * yscale1)[1]) -- integer
         local y1b = Int:create(SH/2 - Int:create(yfloor * yscale1)[1]) -- integer
         local y2a = Int:create(SH/2 - Int:create(yceil * yscale2)[1]) -- integer
         local y2b = Int:create(SH/2 - Int:create(yfloor * yscale2)[1]) -- integer
+        -- project neighbors ceiling and floor heights into screen coodrinates
+        local ny1a = Int:create(SH/2 - Int:create(nyceil * yscale1)[1]) -- integer
+        local ny1b = Int:create(SH/2 - Int:create(nyfloor * yscale1)[1]) -- integer
+        local ny2a = Int:create(SH/2 - Int:create(nyceil * yscale2)[1]) -- integer
+        local ny2b = Int:create(SH/2 - Int:create(nyfloor * yscale2)[1]) -- integer
 
         -- render wall
 
@@ -177,20 +201,43 @@ local function DrawScreen()
             
             
             -- render ceiling
-            vLine(x, ytop[x], (cya-1)[1], {0,0,0},{255,0,0},{0,0,0})
+            vLine(x, ytop[x], (cya-1)[1], colors.black,colors.dark_grey,colors.black)
             -- render floor
-            vLine(x, (cyb+1)[1], ybottom[x], {0,0,0},{0,255,0},{0,0,0})
-            -- sector behind edge?
+            vLine(x, (cyb+1)[1], ybottom[x], colors.black,colors.blue,colors.black)
+
+            -- sector neighbors
             if tonumber(neighbor) >= 0 then
-                -- portal
-                vLine(x, cya[1], cyb[1], {0,0,0},{0,0,255},{0,0,0})
+                -- Y coords of ceiling and floor for this X coord
+                local nya = Int:create((x - x1[1]) * (ny2a[1] - ny1a[1]) / (x2[1] - x1[1]) + ny1a[1]) -- integer
+                local ncya = Int:create(clamp(nya[1], ytop[x], ybottom[x])) -- integer
+                local nyb = Int:create((x - x1[1]) * (ny2b[1] - ny1b[1]) / (x2[1] - x1[1]) + ny1b[1]) -- integer
+                local ncyb = Int:create(clamp(nyb[1], ytop[x], ybottom[x])) -- integer
+
+                -- top wall
+                if x==x1[1] or x==x2[1] then
+                    vLine(x, cya[1], (ncya-1)[1], colors.black,colors.black,colors.black)
+                else
+                    vLine(x, cya[1], (ncya-1)[1], colors.black,colors.light_grey,colors.black)
+                end
+                ytop[x] = clamp(math.max(cya[1], ncya[1]), ytop[x], SH-1)
+
+                -- bottom wall
+                if x==x1[1] or x==x2[1] then
+                    vLine(x, (ncyb+1)[1], cyb[1], colors.black,colors.black,colors.black)
+                else
+                    vLine(x, (ncyb+1)[1], cyb[1], colors.black,colors.light_grey,colors.black)
+                end
+                ybottom[x] = clamp(math.min(cyb[1], ncyb[1]), 0, ybottom[x])
+
+                -- placeholder portals
+                vLine(x, ytop[x], ybottom[x], colors.black,colors.red,colors.black)
+
             else
                 if x==x1[1] or x==x2[1] then
-                    -- ??
-                    vLine(x, cya[1], cyb[1], {0,0,0},{100,100,100},{0,0,0})
+                    vLine(x, cya[1], cyb[1], colors.black,colors.black,colors.black)
                 else
                     -- render wall
-                    vLine(x, cya[1], cyb[1], {0,0,0},{255,255,255},{0,0,0})
+                    vLine(x, cya[1], cyb[1], colors.black,colors.light_grey,colors.black)
                 end
             end
 
@@ -201,6 +248,7 @@ local function DrawScreen()
 
 end
 
+-- moves and rotates player
 local function movePlayer(dx, dy)
     local px = player.where.x
     local py = player.where.y
@@ -212,7 +260,7 @@ local function movePlayer(dx, dy)
          and intersectBox(px,py, px+dx,py+dy, sect.vertexes[s+0].x, sect.vertexes[s+0].y, sect.vertexes[s+1].x, sect.vertexes[s+1].y)
           and pointSide(px+dx, py+dy, sect.vertexes[s+0].x, sect.vertexes[s+0].y, sect.vertexes[s+1].x, sect.vertexes[s+1].y) < 0 then
             player.sector = sect.neighbors[s]
-            print("Player is now in sector %d\n", player.sector)
+            print("Player is now in sector: " .. player.sector)
         end
     end
 
@@ -223,7 +271,6 @@ local function movePlayer(dx, dy)
     player.where.y = player.where.y + player.velocity.y
 
     if mouseDX > 1 or mouseDX < -1 then
-
         player.angle = player.angle + mouseDX * 0.03
         player.angleCos = math.cos(player.angle)
         player.angleSin = math.sin(player.angle)
@@ -277,9 +324,6 @@ end
 
 
 function love.draw()
-    love.graphics.setColor(love.math.colorFromBytes(255, 255, 255))
-    love.graphics.print("FPS: " .. love.timer.getFPS(), 10, 12)
-    
     if map then
         for i = 1, #sectors, 1 do
             for j = 1, #sectors[i].vertexes do
@@ -290,6 +334,9 @@ function love.draw()
     else  
         DrawScreen()
     end
+   
+    love.graphics.setColor(love.math.colorFromBytes(255, 255, 255))
+    love.graphics.print("FPS: " .. love.timer.getFPS(), 10, 12)
     
     local cur_time = love.timer.getTime()
     if next_time <= cur_time then

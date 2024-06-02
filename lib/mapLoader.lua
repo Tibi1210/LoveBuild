@@ -6,6 +6,7 @@ local mapLoader = {}
 --                float y}
 -- char neighbors
 -- unsigned npoints
+-- unsigned isRendered;
 local sectors = {}
 
 -- float x
@@ -52,6 +53,7 @@ local function loadSectors(heights, vert, neighbors)
     sectors[#sectors].ceil = tonumber(h[2])
     sectors[#sectors].npoints = #v
     sectors[#sectors].neighbors = {}
+    sectors[#sectors].isRendered = 0
     for index, value in ipairs(n) do
         if tonumber(value) ~= -1 then
             sectors[#sectors].neighbors[index] = tonumber(value) + 1

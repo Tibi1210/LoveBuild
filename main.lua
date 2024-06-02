@@ -1,11 +1,7 @@
 local next_time
 local min_dt
 local map = false
-
-local mouseX = 0
-local mouseY = 0
-local mouseDX = 0
-local mouseDY = 0
+local renderLimit = 16
 
 local colors = {
     red = {255,0,0},
@@ -23,6 +19,7 @@ local colors = {
 --                float y};
 -- char neighbors;
 -- unsigned npoints;
+-- unsigned isRendered;
 local sectors = {}
 
 -- struct where {float x,
@@ -37,6 +34,17 @@ local sectors = {}
 -- float yaw;
 -- unsigned sector;
 local player = {}
+
+
+local function table_contains(tab, val)
+    for key, value in pairs(tab) do
+       if value.sectorno == val then
+            return true
+       end
+    end
+
+    return false
+end
 
 -- clamp value into set range
 local function clamp(a, mi,ma)
@@ -90,166 +98,189 @@ end
 
 -- renders sectors->walls
 local function DrawScreen()
+    local renderQ = 0
+    local renderQueue = {}
 
-    local now = {
+    table.insert(renderQueue, {
         sectorno = player.sector, -- int
         sx1 = 1, -- int
         sx2 = SW-1 -- int
-    }
+    })
 
     local ytop = {}    --int array
     local ybottom = {}    --int array
     for i=1, SW do ytop[i] = 0 end
     for i=1, SW do ybottom[i] = SH-1 end
 
-    local sect = sectors[now.sectorno]
-
-    -- render each wall of the sector
-    for s = 1, sect.npoints do
-        -- get (x,y) coords of the two ends of the sector
-        -- transform into players view
-        local vx1 = sect.vertexes[s+0].x - player.where.x -- float
-        local vy1 = sect.vertexes[s+0].y - player.where.y -- float
-        local vx2 = sect.vertexes[s+1].x - player.where.x -- float
-        local vy2 = sect.vertexes[s+1].y - player.where.y -- float
+    print("##############################")
+    while (renderQ < renderLimit) and (renderQueue[1] ~= nil) do
         
-        -- rotate them around the player
-        local pcos = player.angleCos -- float
-        local psin = player.angleSin -- float
-        local tx1 = vx1 * psin - vy1 * pcos -- float
-        local tz1 = vx1 * pcos + vy1 * psin -- float
-        local tx2 = vx2 * psin - vy2 * pcos -- float
-        local tz2 = vx2 * pcos + vy2 * psin -- float
+        local now = table.remove(renderQueue, 1)
 
-        -- is the wall in front of the player
-        if tz1 <= 0 and tz2 <=0 then goto continue end
-        -- if partially behind player clip
-        if tz1 <= 0 or tz2 <=0 then
-            local nearz = 1*(10^(-4)) -- float
-            local farz = 5 -- float
-            local nearside = 1*(10^(-5))
-            local farside = 20.0
-            local i1 = intersect(tx1,tz1,tx2,tz2, -nearside, nearz, -farside, farz) -- vertex
-            local i2 = intersect(tx1,tz1,tx2,tz2,  nearside, nearz,  farside, farz) -- vertex
-            if tz1 < nearz then
-                if i1.y > 0 then
-                    tx1 = i1.x
-                    tz1 = i1.y
-                else
-                    tx1 = i2.x
-                    tz1 = i2.y
+        if sectors[now.sectorno].isRendered == 1 then goto SectorContinue end
+
+        local sect = sectors[now.sectorno]
+        print("Redering sector: " .. now.sectorno)
+        sectors[now.sectorno].isRendered = 1
+    
+        -- render each wall of the sector
+        for s = 1, sect.npoints do
+            -- get (x,y) coords of the two ends of the sector
+            -- transform into players view
+            local vx1 = sect.vertexes[s+0].x - player.where.x -- float
+            local vy1 = sect.vertexes[s+0].y - player.where.y -- float
+            local vx2 = sect.vertexes[s+1].x - player.where.x -- float
+            local vy2 = sect.vertexes[s+1].y - player.where.y -- float
+            
+            -- rotate them around the player
+            local pcos = player.angleCos -- float
+            local psin = player.angleSin -- float
+            local tx1 = vx1 * psin - vy1 * pcos -- float
+            local tz1 = vx1 * pcos + vy1 * psin -- float
+            local tx2 = vx2 * psin - vy2 * pcos -- float
+            local tz2 = vx2 * pcos + vy2 * psin -- float
+    
+            -- is the wall in front of the player
+            if tz1 <= 0 and tz2 <=0 then goto WallContinue end
+            -- if partially behind player clip
+            if tz1 <= 0 or tz2 <=0 then
+                local nearz = 1*(10^(-4)) -- float
+                local farz = 5 -- float
+                local nearside = 1*(10^(-5))
+                local farside = 20.0
+                local i1 = intersect(tx1,tz1,tx2,tz2, -nearside, nearz, -farside, farz) -- vertex
+                local i2 = intersect(tx1,tz1,tx2,tz2,  nearside, nearz,  farside, farz) -- vertex
+                if tz1 < nearz then
+                    if i1.y > 0 then
+                        tx1 = i1.x
+                        tz1 = i1.y
+                    else
+                        tx1 = i2.x
+                        tz1 = i2.y
+                    end
+                end
+    
+                if tz2 < nearz then
+                    if i1.y > 0 then
+                        tx2 = i1.x
+                        tz2 = i1.y
+                    else
+                        tx2 = i2.x
+                        tz2 = i2.y
+                    end
                 end
             end
-
-            if tz2 < nearz then
-                if i1.y > 0 then
-                    tx2 = i1.x
-                    tz2 = i1.y
-                else
-                    tx2 = i2.x
-                    tz2 = i2.y
-                end
+            
+            -- perspective transformation
+            local xscale1 = H_FOV / tz1
+            local yscale1 = V_FOV / tz1
+            local x1 = Int:create(SW/2 - Int:create(tx1 * xscale1)[1]) -- integer
+    
+            local xscale2 = H_FOV / tz2
+            local yscale2 = V_FOV / tz2
+            local x2 = Int:create(SW/2 - Int:create(tx2 * xscale2)[1]) -- integer
+            -- only render if visible
+            if x1[1]>=x2[1] or x2[1]<now.sx1 or x1[1]>now.sx2 then goto WallContinue end
+    
+            -- floor and ceiling heights relative to player
+            local yceil = sect.ceil - player.where.z -- float
+            local yfloor = sect.floor - player.where.z -- float
+    
+            local neighbor = sect.neighbors[s]
+    
+            local nyceil = 0 --float
+            local nyfloor = 0 --float
+            if neighbor >= 0 then
+                nyceil = sectors[neighbor].ceil - player.where.z
+                nyfloor = sectors[neighbor].floor - player.where.z
             end
-        end
-        
-        -- perspective transformation
-        local xscale1 = H_FOV / tz1
-        local yscale1 = V_FOV / tz1
-        local x1 = Int:create(SW/2 - Int:create(tx1 * xscale1)[1]) -- integer
-
-        local xscale2 = H_FOV / tz2
-        local yscale2 = V_FOV / tz2
-        local x2 = Int:create(SW/2 - Int:create(tx2 * xscale2)[1]) -- integer
-        -- only render if visible
-        if x1[1]>=x2[1] or x2[1]<now.sx1 or x1[1]>now.sx2 then goto continue end
-
-        -- floor and ceiling heights relative to player
-        local yceil = sect.ceil - player.where.z -- float
-        local yfloor = sect.floor - player.where.z -- float
-
-        local neighbor = sect.neighbors[s]
-
-        local nyceil = 0 --float
-        local nyfloor = 0 --float
-        if neighbor >= 0 then
-            nyceil = sectors[neighbor].ceil - player.where.z
-            nyfloor = sectors[neighbor].floor - player.where.z
-        end
-
-        -- project ceiling and floor heights into screen coodrinates
-        local y1a = Int:create(SH/2 - Int:create(yceil * yscale1)[1]) -- integer
-        local y1b = Int:create(SH/2 - Int:create(yfloor * yscale1)[1]) -- integer
-        local y2a = Int:create(SH/2 - Int:create(yceil * yscale2)[1]) -- integer
-        local y2b = Int:create(SH/2 - Int:create(yfloor * yscale2)[1]) -- integer
-        -- project neighbors ceiling and floor heights into screen coodrinates
-        local ny1a = Int:create(SH/2 - Int:create(nyceil * yscale1)[1]) -- integer
-        local ny1b = Int:create(SH/2 - Int:create(nyfloor * yscale1)[1]) -- integer
-        local ny2a = Int:create(SH/2 - Int:create(nyceil * yscale2)[1]) -- integer
-        local ny2b = Int:create(SH/2 - Int:create(nyfloor * yscale2)[1]) -- integer
-
-        -- render wall
-
-        local beginx = math.max(x1[1], now.sx1) -- integer
-        local endx = math.min(x2[1], now.sx2) -- integer
-        for x = beginx, endx do  --------------------------------- i<=endx
-
-            -- Y coords of ceiling and floor for this X coord
-            local ya = Int:create((x - x1[1]) * (y2a[1] - y1a[1]) / (x2[1] - x1[1]) + y1a[1]) -- integer
-            local cya = Int:create(clamp(ya[1], ytop[x], ybottom[x])) -- integer
-            local yb = Int:create((x - x1[1]) * (y2b[1] - y1b[1]) / (x2[1] - x1[1]) + y1b[1]) -- integer
-            local cyb = Int:create(clamp(yb[1], ytop[x], ybottom[x])) -- integer
-            
-            
-            -- render ceiling
-            vLine(x, ytop[x], (cya-1)[1], colors.black,colors.dark_grey,colors.black)
-            -- render floor
-            vLine(x, (cyb+1)[1], ybottom[x], colors.black,colors.blue,colors.black)
-
-            -- sector neighbors
-            if tonumber(neighbor) >= 0 then
+    
+            -- project ceiling and floor heights into screen coodrinates
+            local y1a = Int:create(SH/2 - Int:create(yceil * yscale1)[1]) -- integer
+            local y1b = Int:create(SH/2 - Int:create(yfloor * yscale1)[1]) -- integer
+            local y2a = Int:create(SH/2 - Int:create(yceil * yscale2)[1]) -- integer
+            local y2b = Int:create(SH/2 - Int:create(yfloor * yscale2)[1]) -- integer
+            -- project neighbors ceiling and floor heights into screen coodrinates
+            local ny1a = Int:create(SH/2 - Int:create(nyceil * yscale1)[1]) -- integer
+            local ny1b = Int:create(SH/2 - Int:create(nyfloor * yscale1)[1]) -- integer
+            local ny2a = Int:create(SH/2 - Int:create(nyceil * yscale2)[1]) -- integer
+            local ny2b = Int:create(SH/2 - Int:create(nyfloor * yscale2)[1]) -- integer
+    
+            -- render wall
+    
+            local beginx = math.max(x1[1], now.sx1) -- integer
+            local endx = math.min(x2[1], now.sx2) -- integer
+            for x = beginx, endx do  --------------------------------- i<=endx
+    
                 -- Y coords of ceiling and floor for this X coord
-                local nya = Int:create((x - x1[1]) * (ny2a[1] - ny1a[1]) / (x2[1] - x1[1]) + ny1a[1]) -- integer
-                local ncya = Int:create(clamp(nya[1], ytop[x], ybottom[x])) -- integer
-                local nyb = Int:create((x - x1[1]) * (ny2b[1] - ny1b[1]) / (x2[1] - x1[1]) + ny1b[1]) -- integer
-                local ncyb = Int:create(clamp(nyb[1], ytop[x], ybottom[x])) -- integer
+                local ya = Int:create((x - x1[1]) * (y2a[1] - y1a[1]) / (x2[1] - x1[1]) + y1a[1]) -- integer
+                local cya = Int:create(clamp(ya[1], ytop[x], ybottom[x])) -- integer
+                local yb = Int:create((x - x1[1]) * (y2b[1] - y1b[1]) / (x2[1] - x1[1]) + y1b[1]) -- integer
+                local cyb = Int:create(clamp(yb[1], ytop[x], ybottom[x])) -- integer
+                
+                
+                -- render ceiling
+                vLine(x, ytop[x], (cya-1)[1], colors.black,colors.dark_grey,colors.black)
+                -- render floor
+                vLine(x, (cyb+1)[1], ybottom[x], colors.black,colors.blue,colors.black)
 
-                -- top wall
-                if x==x1[1] or x==x2[1] then
-                    vLine(x, cya[1], (ncya-1)[1], colors.black,colors.black,colors.black)
-                else
+                -- sector neighbors
+                if tonumber(neighbor) >= 0 then
+                    -- Y coords of ceiling and floor for this X coord
+                    local nya = Int:create((x - x1[1]) * (ny2a[1] - ny1a[1]) / (x2[1] - x1[1]) + ny1a[1]) -- integer
+                    local ncya = Int:create(clamp(nya[1], ytop[x], ybottom[x])) -- integer
+                    local nyb = Int:create((x - x1[1]) * (ny2b[1] - ny1b[1]) / (x2[1] - x1[1]) + ny1b[1]) -- integer
+                    local ncyb = Int:create(clamp(nyb[1], ytop[x], ybottom[x])) -- integer
+    
+                    -- top wall
                     vLine(x, cya[1], (ncya-1)[1], colors.black,colors.light_grey,colors.black)
-                end
-                ytop[x] = clamp(math.max(cya[1], ncya[1]), ytop[x], SH-1)
-
-                -- bottom wall
-                if x==x1[1] or x==x2[1] then
-                    vLine(x, (ncyb+1)[1], cyb[1], colors.black,colors.black,colors.black)
-                else
+                    ytop[x] = clamp(math.max(cya[1], ncya[1]), ytop[x], SH-1)
+    
+                    -- bottom wall
                     vLine(x, (ncyb+1)[1], cyb[1], colors.black,colors.light_grey,colors.black)
-                end
-                ybottom[x] = clamp(math.min(cyb[1], ncyb[1]), 0, ybottom[x])
-
-                -- placeholder portals
-                vLine(x, ytop[x], ybottom[x], colors.black,colors.red,colors.black)
-
-            else
-                if x==x1[1] or x==x2[1] then
-                    vLine(x, cya[1], cyb[1], colors.black,colors.black,colors.black)
+                    ybottom[x] = clamp(math.min(cyb[1], ncyb[1]), 0, ybottom[x])
+    
+                    -- placeholder portals
+                    -- vLine(x, ytop[x], ybottom[x], colors.black,colors.red,colors.black)
+    
                 else
                     -- render wall
                     vLine(x, cya[1], cyb[1], colors.black,colors.light_grey,colors.black)
                 end
             end
 
+            if neighbor >= 0 and endx > beginx and (sectors[neighbor].isRendered == 0 and not table_contains(renderQueue, neighbor)) then
+                table.insert(renderQueue, {
+                    sectorno = neighbor, -- int
+                    sx1 = beginx, -- int
+                    sx2 = endx -- int
+                })
+            end
+    
+            ::WallContinue::
         end
 
-        ::continue::
+        renderQ = renderQ + 1
+        print("Rendered num: " .. renderQ)
+
+        io.write("Render queue: ")
+        for key, value in pairs(renderQueue) do
+            io.write(value.sectorno..", ")
+        end
+        print()
+        print()
+
+
+        ::SectorContinue::
+    end
+    for key, value in pairs(sectors) do
+        value.isRendered = 0
     end
 
 end
 
 -- moves and rotates player
-local function movePlayer(dx, dy)
+local function movePlayer(dx, dy, dt)
     local px = player.where.x
     local py = player.where.y
     local sect = sectors[player.sector]
@@ -264,25 +295,13 @@ local function movePlayer(dx, dy)
         end
     end
 
-    player.velocity.x = player.velocity.x * (1-acceleration) + dx * acceleration
-    player.velocity.y = player.velocity.y * (1-acceleration) + dy * acceleration
+    player.velocity.x = player.velocity.x * (1-acceleration) + dx * acceleration *dt
+    player.velocity.y = player.velocity.y * (1-acceleration) + dy * acceleration *dt
 
     player.where.x = player.where.x + player.velocity.x
     player.where.y = player.where.y + player.velocity.y
-
-    if mouseDX > 1 or mouseDX < -1 then
-        player.angle = player.angle + mouseDX * 0.03
-        player.angleCos = math.cos(player.angle)
-        player.angleSin = math.sin(player.angle)
-        local yaw = 0
-        yaw = clamp(yaw - mouseDY * 0.05, -5, 0)
-        player.yaw = yaw - player.velocity.z * 0.5
-    end
-
-
     
 end
-
 
 function love.load()
     love.graphics.setDefaultFilter("nearest", "nearest", 0)
@@ -318,12 +337,13 @@ function love.update(dt)
         move_vec[2] = move_vec[2] - player.angleSin*0.2
     end
 
-    movePlayer(move_vec[1], move_vec[2])
+    movePlayer(move_vec[1], move_vec[2], dt)
 
 end
 
 
 function love.draw()
+
     if map then
         for i = 1, #sectors, 1 do
             for j = 1, #sectors[i].vertexes do
@@ -331,7 +351,7 @@ function love.draw()
             end
         end
         drawPixel((player.where.x+(SW/2)), (player.where.y+(SH/2)), 255,0,0)
-    else  
+    else
         DrawScreen()
     end
    
@@ -360,6 +380,13 @@ function love.keypressed(key)
         print("Map opened: ".. tostring(map))
     end
 
+    if key == '[' then
+        renderLimit = renderLimit - 1
+    end
+    if key == ']' then
+        renderLimit = renderLimit + 1
+    end
+
     if key == "tab" then
         --local state = not love.mouse.isVisible()
         --love.mouse.setVisible(state)
@@ -372,8 +399,10 @@ function love.keypressed(key)
 end
 
 function love.mousemoved( x, y, dx, dy, istouch )
-    mouseX = x
-    mouseY = y
-    mouseDX = dx
-    mouseDY = dy
+    player.angle = player.angle + dx * 0.01
+    player.angleCos = math.cos(player.angle)
+    player.angleSin = math.sin(player.angle)
+    local yaw = 0
+    yaw = clamp(yaw - dy * 0.05, -5, 0)
+    player.yaw = yaw - player.velocity.z * 0.5
 end

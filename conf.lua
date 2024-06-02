@@ -2,7 +2,7 @@ _G.love = require("love")
 Int = require "lib/int"
 MapLoader = require "lib/mapLoader"
 
-FPS = 60
+FPS = 144
 SW = 800
 SH = 600
 
